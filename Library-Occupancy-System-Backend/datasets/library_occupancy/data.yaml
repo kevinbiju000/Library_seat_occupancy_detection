@@ -1,0 +1,8 @@
+path: datasets/library_occupancy
+
+train: train/images
+val: valid/images
+test: test/images
+
+nc: 2
+names: ['empty_seat', 'occupied_seat']

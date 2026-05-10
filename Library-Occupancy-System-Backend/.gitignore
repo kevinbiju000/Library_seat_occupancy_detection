@@ -1,0 +1,22 @@
+# Local environment variables (High Priority)
+.env
+.env.example
+
+# OS generated files
+.DS_Store
+
+# IDE settings
+.vscode/
+
+# Large Media/Data
+training_videos/
+
+# Model Weights (Large Binaries)
+*.pt
+
+# Optional: If your static folder contains uploaded/generated content
+# static/
+
+# LLM files
+GEMINI.md
+SUMMARY.md
