@@ -4,6 +4,7 @@ from typing import List, Optional
 import os
 import shutil
 import tempfile
+import threading
 from pathlib import Path
 
 from fastapi import (
@@ -17,7 +18,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import joinedload
 
 from app.core.database import SessionLocal, get_db
@@ -44,6 +45,13 @@ def read_root():
     return {"message": "Welcome to the Library Occupancy System API"}
 
 
+def get_live_service_instance() -> LiveOccupancyService:
+    global live_service_instance
+    if live_service_instance[0] is None:
+        live_service_instance[0] = LiveOccupancyService(video_path=None)
+    return live_service_instance[0]
+
+
 def run_live_analysis_task(video_path: str, temp_dir: str, service_instance):
     """Background task for live analysis."""
     try:
@@ -59,6 +67,47 @@ def run_live_analysis_task(video_path: str, temp_dir: str, service_instance):
             print(f"Cleaned up temporary directory: {temp_dir}")
         except Exception as e:
             print(f"Error cleaning up temp directory {temp_dir}: {e}")
+
+
+@app.post("/api/v1/live/frame")
+def process_live_frame(
+    frame: UploadFile = File(...),
+):
+    """Accepts a single image frame from the frontend and returns the annotated image."""
+    if frame.content_type not in ("image/jpeg", "image/png", "image/jpg"):
+        raise HTTPException(status_code=400, detail="Upload a JPEG or PNG image frame.")
+
+    try:
+        image_bytes = frame.file.read()
+        service = get_live_service_instance()
+        annotated_bytes = service.process_frame_bytes(image_bytes)
+        return Response(content=annotated_bytes, media_type="image/jpeg")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to process image frame.")
+
+
+# @app.post("/api/v1/analyze/image")
+# def analyze_image(
+#     image: UploadFile = File(...),
+# ):
+#     """
+#     Accepts a single image file and returns the image with seat status overlays.
+#     This is for one-time image analysis, not continuous video processing.
+#     """
+#     if image.content_type not in ("image/jpeg", "image/png", "image/jpg"):
+#         raise HTTPException(status_code=400, detail="Upload a JPEG or PNG image.")
+
+#     try:
+#         image_bytes = image.file.read()
+#         service = get_live_service_instance()
+#         annotated_bytes = service.process_frame_bytes(image_bytes)
+#         return Response(content=annotated_bytes, media_type="image/jpeg")
+#     except ValueError as exc:
+#         raise HTTPException(status_code=400, detail=str(exc))
+#     except Exception as exc:
+#         raise HTTPException(status_code=500, detail="Failed to analyze image.")
 
 
 @app.post("/api/v1/live/start")
@@ -81,7 +130,9 @@ def start_live_analysis(
     live_service_instance = [None]  # Use list to modify in function
 
     print(f"Live analysis started for video: {video.filename}, path: {video_path}")
-    background_tasks.add_task(run_live_analysis_task, video_path, temp_dir, live_service_instance)
+    background_tasks.add_task(
+        run_live_analysis_task, video_path, temp_dir, live_service_instance
+    )
     return {
         "message": "Live analysis started in the background.",
         "video_filename": video.filename,
@@ -110,16 +161,11 @@ def get_occupancy_status():
     """
     if live_service_instance[0] is None:
         return schemas.OccupancyStatusResponse(
-            occupied_seats=0,
-            empty_seats=0,
-            total_seats=0
+            occupied_seats=0, empty_seats=0, total_seats=0
         )
     service = live_service_instance[0]
     return schemas.OccupancyStatusResponse(
         occupied_seats=service.latest_occupied,
         empty_seats=service.latest_empty,
-        total_seats=service.latest_occupied + service.latest_empty
+        total_seats=service.latest_occupied + service.latest_empty,
     )
-
-
-
